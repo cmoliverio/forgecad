@@ -54,7 +54,7 @@ impl RenderOptions {
     }
 
     pub fn set_perspective_fov(&mut self, fov: f32) {
-        self.perspective_fov = fov.clamp(45.0, 110.0);
+        self.perspective_fov = fov.clamp(0.0, 110.0);
     }
 
     pub fn set_background_color(&mut self, color: Color) {

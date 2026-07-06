@@ -10,18 +10,27 @@ use render_options::{Color, ProjectionKind, RenderOptions};
 
 fn main() {
     let mut graph = BRepGraph::new();
-    let a = graph.add_vertex(Point3::new(-0.5, -0.5, 0.0));
-    let b = graph.add_vertex(Point3::new(0.5, -0.5, 0.0));
-    let c = graph.add_vertex(Point3::new(0.5, 0.5, 0.0));
-    let d = graph.add_vertex(Point3::new(-0.5, 0.5, 0.0));
+    let v0 = graph.add_vertex(Point3::new(-0.5, -0.5, -0.5));
+    let v1 = graph.add_vertex(Point3::new(0.5, -0.5, -0.5));
+    let v2 = graph.add_vertex(Point3::new(0.5, 0.5, -0.5));
+    let v3 = graph.add_vertex(Point3::new(-0.5, 0.5, -0.5));
+    let v4 = graph.add_vertex(Point3::new(-0.5, -0.5, 0.5));
+    let v5 = graph.add_vertex(Point3::new(0.5, -0.5, 0.5));
+    let v6 = graph.add_vertex(Point3::new(0.5, 0.5, 0.5));
+    let v7 = graph.add_vertex(Point3::new(-0.5, 0.5, 0.5));
 
-    let ab = graph.add_edge(a, b);
-    let bc = graph.add_edge(b, c);
-    let cd = graph.add_edge(c, d);
-    let da = graph.add_edge(d, a);
-
-    let face = graph.add_face();
-    graph.add_loop(face, vec![ab, bc, cd, da]);
+    let _ = graph.add_edge(v0, v1);
+    let _ = graph.add_edge(v1, v2);
+    let _ = graph.add_edge(v2, v3);
+    let _ = graph.add_edge(v3, v0);
+    let _ = graph.add_edge(v4, v5);
+    let _ = graph.add_edge(v5, v6);
+    let _ = graph.add_edge(v6, v7);
+    let _ = graph.add_edge(v7, v4);
+    let _ = graph.add_edge(v0, v4);
+    let _ = graph.add_edge(v1, v5);
+    let _ = graph.add_edge(v2, v6);
+    let _ = graph.add_edge(v3, v7);
 
     let width = 800;
     let height = 600;
@@ -29,7 +38,7 @@ fn main() {
     let mut render_options = RenderOptions::default();
     let camera = Camera::default();
     render_options.set_projection_kind(ProjectionKind::Perspective);
-    render_options.set_perspective_fov(90.0);
+    render_options.set_perspective_fov(0.0);
     render_options.set_background_color(Color::new(0x3a, 0x3a, 0x3a));
     render_options.set_edge_color(Color::new(0xff, 0xff, 0xff));
     render_options.set_vertex_color(Color::new(0x49, 0x95, 0xdd));
@@ -44,12 +53,16 @@ fn main() {
 
     window.limit_update_rate(Some(std::time::Duration::from_millis(16)));
 
-    let mut angle = 0.0f32;
+    let angle = 0.0f32;
     let mut p_is_down = false;
     let mut o_is_down = false;
+    let mut a_is_down = false;
+    let mut s_is_down = false;
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let p_down = window.is_key_down(Key::P);
         let o_down = window.is_key_down(Key::O);
+        let a_down = window.is_key_down(Key::A);
+        let s_down = window.is_key_down(Key::S);
 
         if p_down && !p_is_down {
             render_options.set_projection_kind(ProjectionKind::Perspective);
@@ -57,14 +70,21 @@ fn main() {
         if o_down && !o_is_down {
             render_options.set_projection_kind(ProjectionKind::Orthographic);
         }
+        if a_down && !a_is_down {
+            render_options.set_perspective_fov(render_options.perspective_fov + 5.0);
+        }
+        if s_down && !s_is_down {
+            render_options.set_perspective_fov(render_options.perspective_fov - 5.0);
+        }
 
         p_is_down = p_down;
         o_is_down = o_down;
+        a_is_down = a_down;
+        s_is_down = s_down;
 
         buffer.iter_mut().for_each(|pixel| *pixel = render_options.background_color.to_u32());
         render_graph(&mut buffer, width, height, &graph, angle, &render_options, &camera);
         window.update_with_buffer(&buffer, width, height).unwrap();
-        angle += 0.02;
     }
 }
 
@@ -79,7 +99,9 @@ fn render_graph(
 ) {
     let center_x = width as f32 / 2.0;
     let center_y = height as f32 / 2.0;
-    let scale = 180.0f32;
+    let ortho_scale = height as f32 / 2.0;
+    let fov = render_options.perspective_fov.max(0.001);
+    let perspective_scale = (height as f32 / 2.0) / (fov.to_radians() / 2.0).tan();
 
     for edge in graph.edges() {
         let Some((from, to)) = edge.endpoints() else {
@@ -87,9 +109,13 @@ fn render_graph(
         };
         let p0 = rotate_z(graph.vertex_position(from), angle);
         let p1 = rotate_z(graph.vertex_position(to), angle);
-        let start = project_point(p0, center_x, center_y, scale, render_options, camera);
-        let end = project_point(p1, center_x, center_y, scale, render_options, camera);
-        draw_line(buffer, width, height, start, end, render_options.edge_color.to_u32());
+
+        if let (Some(start), Some(end)) = (
+            project_point(p0, center_x, center_y, ortho_scale, perspective_scale, render_options, camera),
+            project_point(p1, center_x, center_y, ortho_scale, perspective_scale, render_options, camera),
+        ) {
+            draw_line(buffer, width, height, start, end, render_options.edge_color.to_u32());
+        }
     }
 
     let axis_length = 0.25;
@@ -100,29 +126,35 @@ fn render_graph(
     ];
 
     for (from, to, color) in axis_lines {
-        let start = project_point(from, center_x, center_y, scale, render_options, camera);
-        let end = project_point(to, center_x, center_y, scale, render_options, camera);
-        draw_line(buffer, width, height, start, end, color);
+        if let (Some(start), Some(end)) = (
+            project_point(from, center_x, center_y, ortho_scale, perspective_scale, render_options, camera),
+            project_point(to, center_x, center_y, ortho_scale, perspective_scale, render_options, camera),
+        ) {
+            draw_line(buffer, width, height, start, end, color);
+        }
     }
 
     for point in graph.vertices() {
         let rotated = rotate_z(point, angle);
-        let projected = project_point(rotated, center_x, center_y, scale, render_options, camera);
-        draw_point(buffer, width, height, projected, render_options.vertex_color.to_u32());
+        if let Some(projected) = project_point(rotated, center_x, center_y, ortho_scale, perspective_scale, render_options, camera) {
+            draw_point(buffer, width, height, projected, render_options.vertex_color.to_u32());
+        }
     }
 
-    let origin = project_point(Point3::new(0.0, 0.0, 0.0), center_x, center_y, scale, render_options, camera);
-    draw_point(buffer, width, height, origin, 0xFF0000_u32);
+    if let Some(origin) = project_point(Point3::new(0.0, 0.0, 0.0), center_x, center_y, ortho_scale, perspective_scale, render_options, camera) {
+        draw_point(buffer, width, height, origin, 0xFF0000_u32);
+    }
 }
 
 fn project_point(
     point: Point3,
     center_x: f32,
     center_y: f32,
-    scale: f32,
+    ortho_scale: f32,
+    perspective_scale: f32,
     render_options: &RenderOptions,
     camera: &Camera,
-) -> (i32, i32) {
+) -> Option<(i32, i32)> {
     let view = camera.view_matrix();
     let world = point;
 
@@ -130,21 +162,32 @@ fn project_point(
     let view_y = view[1] * world.x + view[5] * world.y + view[9] * world.z + view[13];
     let view_z = view[2] * world.x + view[6] * world.y + view[10] * world.z + view[14];
 
-    let (screen_x, screen_y) = match render_options.projection_kind {
-        ProjectionKind::Orthographic => {
-            let screen_x = center_x + view_x * scale;
-            let screen_y = center_y - view_y * scale;
-            (screen_x, screen_y)
-        }
+    if view_z >= -0.01 {
+        return None;
+    }
+
+    let ortho_x = center_x + view_x * ortho_scale;
+    let ortho_y = center_y - view_y * ortho_scale;
+
+    let screen_x = center_x + (view_x * perspective_scale) / (-view_z);
+    let screen_y = center_y - (view_y * perspective_scale) / (-view_z);
+
+    let screen = match render_options.projection_kind {
+        ProjectionKind::Orthographic => (ortho_x, ortho_y),
         ProjectionKind::Perspective => {
-            let depth = -view_z.max(-0.1);
-            let screen_x = center_x + (view_x * scale) / depth;
-            let screen_y = center_y - (view_y * scale) / depth;
-            (screen_x, screen_y)
+            let blend = (render_options.perspective_fov / 90.0).clamp(0.0, 1.0);
+            if blend <= 0.0 {
+                (ortho_x, ortho_y)
+            } else {
+                (
+                    ortho_x * (1.0 - blend) + screen_x * blend,
+                    ortho_y * (1.0 - blend) + screen_y * blend,
+                )
+            }
         }
     };
 
-    (screen_x as i32, screen_y as i32)
+    Some((screen.0 as i32, screen.1 as i32))
 }
 
 fn rotate_z(point: Point3, angle: f32) -> Point3 {

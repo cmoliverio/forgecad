@@ -12,7 +12,7 @@ pub struct Camera {
 impl Default for Camera {
     fn default() -> Self {
         Self {
-            position: Point3::new(5.0, 2.0, 5.0),
+            position: Point3::new(4.0, 3.0, 5.0),
             target: Point3::new(0.0, 0.0, 0.0),
             yaw: -45.0f32.to_radians(),
             pitch: 35.264f32.to_radians(),
