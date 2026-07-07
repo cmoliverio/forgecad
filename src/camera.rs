@@ -12,7 +12,7 @@ pub struct Camera {
 impl Default for Camera {
     fn default() -> Self {
         Self {
-            position: Point3::new(4.0, 3.0, 5.0),
+            position: Point3::new(1.8, 2.0, 1.0),
             target: Point3::new(0.0, 0.0, 0.0),
             yaw: -45.0f32.to_radians(),
             pitch: 35.264f32.to_radians(),
@@ -45,6 +45,13 @@ impl Camera {
         m[14] = forward.dot(self.position);
         m[15] = 1.0;
         m
+    }
+
+    pub fn distance_to_target(&self) -> f32 {
+        let dx = self.position.x - self.target.x;
+        let dy = self.position.y - self.target.y;
+        let dz = self.position.z - self.target.z;
+        (dx * dx + dy * dy + dz * dz).sqrt()
     }
 
     pub fn forward_vector(&self) -> Point3 {

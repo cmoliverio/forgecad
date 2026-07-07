@@ -31,6 +31,7 @@ impl Color {
 pub struct RenderOptions {
     pub projection_kind: ProjectionKind,
     pub perspective_fov: f32,
+    pub ortho_scale: f32,
     pub background_color: Color,
     pub edge_color: Color,
     pub vertex_color: Color,
@@ -41,6 +42,7 @@ impl Default for RenderOptions {
         Self {
             projection_kind: ProjectionKind::default(),
             perspective_fov: 90.0,
+            ortho_scale: 300.0,
             background_color: Color::new(0x3a, 0x3a, 0x3a),
             edge_color: Color::new(0xff, 0xff, 0xff),
             vertex_color: Color::new(0x49, 0x95, 0xdd),
@@ -55,6 +57,15 @@ impl RenderOptions {
 
     pub fn set_perspective_fov(&mut self, fov: f32) {
         self.perspective_fov = fov.clamp(0.0, 110.0);
+    }
+
+    pub fn set_ortho_scale(&mut self, scale: f32) {
+        self.ortho_scale = scale.clamp(1.0, 10000.0);
+    }
+
+    pub fn adjust_ortho_scale(&mut self, delta_factor: f32) {
+        let new = self.ortho_scale * delta_factor;
+        self.set_ortho_scale(new);
     }
 
     pub fn set_background_color(&mut self, color: Color) {

@@ -77,6 +77,15 @@ fn main() {
             render_options.set_perspective_fov(render_options.perspective_fov - 5.0);
         }
 
+        // Mouse wheel zoom for orthographic scale
+        if let Some((_sx, sy)) = window.get_scroll_wheel() {
+            if sy > 0.0 {
+                render_options.adjust_ortho_scale(0.9);
+            } else if sy < 0.0 {
+                render_options.adjust_ortho_scale(1.1);
+            }
+        }
+
         p_is_down = p_down;
         o_is_down = o_down;
         a_is_down = a_down;
@@ -99,20 +108,39 @@ fn render_graph(
 ) {
     let center_x = width as f32 / 2.0;
     let center_y = height as f32 / 2.0;
-    let ortho_scale = height as f32 / 2.0;
-    let fov = render_options.perspective_fov.max(0.001);
-    let perspective_scale = (height as f32 / 2.0) / (fov.to_radians() / 2.0).tan();
+    let ortho_scale = render_options.ortho_scale;
+    let z_ref = camera.distance_to_target();
+    let match_fov = matched_perspective_fov(ortho_scale, z_ref, height as f32);
+    let effective_fov = effective_perspective_fov(render_options.perspective_fov, match_fov);
+    let perspective_scale = (height as f32 / 2.0) / (effective_fov.to_radians() / 2.0).tan();
 
     for edge in graph.edges() {
         let Some((from, to)) = edge.endpoints() else {
             continue;
         };
+
         let p0 = rotate_z(graph.vertex_position(from), angle);
         let p1 = rotate_z(graph.vertex_position(to), angle);
 
         if let (Some(start), Some(end)) = (
-            project_point(p0, center_x, center_y, ortho_scale, perspective_scale, render_options, camera),
-            project_point(p1, center_x, center_y, ortho_scale, perspective_scale, render_options, camera),
+            project_point(
+                p0,
+                center_x,
+                center_y,
+                ortho_scale,
+                perspective_scale,
+                render_options,
+                camera,
+            ),
+            project_point(
+                p1,
+                center_x,
+                center_y,
+                ortho_scale,
+                perspective_scale,
+                render_options,
+                camera,
+            ),
         ) {
             draw_line(buffer, width, height, start, end, render_options.edge_color.to_u32());
         }
@@ -120,15 +148,43 @@ fn render_graph(
 
     let axis_length = 0.25;
     let axis_lines = [
-        (Point3::new(0.0, 0.0, 0.0), Point3::new(axis_length, 0.0, 0.0), 0xFF0000_u32),
-        (Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, axis_length, 0.0), 0x00FF00_u32),
-        (Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, axis_length), 0x0000FF_u32),
+        (
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(axis_length, 0.0, 0.0),
+            0xFF0000_u32,
+        ),
+        (
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.0, axis_length, 0.0),
+            0x00FF00_u32,
+        ),
+        (
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.0, 0.0, axis_length),
+            0x0000FF_u32,
+        ),
     ];
 
     for (from, to, color) in axis_lines {
         if let (Some(start), Some(end)) = (
-            project_point(from, center_x, center_y, ortho_scale, perspective_scale, render_options, camera),
-            project_point(to, center_x, center_y, ortho_scale, perspective_scale, render_options, camera),
+            project_point(
+                from,
+                center_x,
+                center_y,
+                ortho_scale,
+                perspective_scale,
+                render_options,
+                camera,
+            ),
+            project_point(
+                to,
+                center_x,
+                center_y,
+                ortho_scale,
+                perspective_scale,
+                render_options,
+                camera,
+            ),
         ) {
             draw_line(buffer, width, height, start, end, color);
         }
@@ -136,12 +192,28 @@ fn render_graph(
 
     for point in graph.vertices() {
         let rotated = rotate_z(point, angle);
-        if let Some(projected) = project_point(rotated, center_x, center_y, ortho_scale, perspective_scale, render_options, camera) {
+        if let Some(projected) = project_point(
+            rotated,
+            center_x,
+            center_y,
+            ortho_scale,
+            perspective_scale,
+            render_options,
+            camera,
+        ) {
             draw_point(buffer, width, height, projected, render_options.vertex_color.to_u32());
         }
     }
 
-    if let Some(origin) = project_point(Point3::new(0.0, 0.0, 0.0), center_x, center_y, ortho_scale, perspective_scale, render_options, camera) {
+    if let Some(origin) = project_point(
+        Point3::new(0.0, 0.0, 0.0),
+        center_x,
+        center_y,
+        ortho_scale,
+        perspective_scale,
+        render_options,
+        camera,
+    ) {
         draw_point(buffer, width, height, origin, 0xFF0000_u32);
     }
 }
@@ -176,6 +248,7 @@ fn project_point(
         ProjectionKind::Orthographic => (ortho_x, ortho_y),
         ProjectionKind::Perspective => {
             let blend = (render_options.perspective_fov / 90.0).clamp(0.0, 1.0);
+            print!("\rBlend: {:.2}, FOV: {:.2}   ", blend, render_options.perspective_fov);
             if blend <= 0.0 {
                 (ortho_x, ortho_y)
             } else {
@@ -188,6 +261,19 @@ fn project_point(
     };
 
     Some((screen.0 as i32, screen.1 as i32))
+}
+
+fn effective_perspective_fov(raw_fov: f32, match_fov: f32) -> f32 {
+    let f = raw_fov.max(0.0);
+    let blend = (f / 90.0).clamp(0.0, 1.0);
+    match_fov * (1.0 - blend) + f * blend
+}
+
+fn matched_perspective_fov(ortho_scale: f32, z_ref: f32, height: f32) -> f32 {
+    let perspective_scale = ortho_scale * z_ref;
+    let half_height = height / 2.0;
+    let fov = 2.0 * (half_height / perspective_scale).atan();
+    fov.to_degrees().clamp(0.1, 179.0)
 }
 
 fn rotate_z(point: Point3, angle: f32) -> Point3 {
