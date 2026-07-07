@@ -292,14 +292,22 @@ fn draw_point(buffer: &mut [u32], width: usize, height: usize, point: (i32, i32)
     let max_x = (width as i32).saturating_sub(1);
     let max_y = (height as i32).saturating_sub(1);
 
+    if cx < 0 || cx > max_x || cy < 0 || cy > max_y {
+        return;
+    }
+
     for y in -radius..=radius {
         for x in -radius..=radius {
             if x * x + y * y > radius * radius {
                 continue;
             }
 
-            let px = cx.saturating_add(x).clamp(0, max_x);
-            let py = cy.saturating_add(y).clamp(0, max_y);
+            let px = cx + x;
+            let py = cy + y;
+            if px < 0 || px > max_x || py < 0 || py > max_y {
+                continue;
+            }
+
             let idx = (py as usize) * width + (px as usize);
             if let Some(pixel) = buffer.get_mut(idx) {
                 *pixel = color;
@@ -311,36 +319,121 @@ fn draw_point(buffer: &mut [u32], width: usize, height: usize, point: (i32, i32)
 fn draw_line(buffer: &mut [u32], width: usize, height: usize, start: (i32, i32), end: (i32, i32), color: u32) {
     let max_x = (width as i32).saturating_sub(1);
     let max_y = (height as i32).saturating_sub(1);
-    let (x0, y0) = start;
-    let (x1, y1) = end;
-    let x0 = x0.clamp(0, max_x);
-    let y0 = y0.clamp(0, max_y);
-    let x1 = x1.clamp(0, max_x);
-    let y1 = y1.clamp(0, max_y);
+    let min_x = 0.0f32;
+    let min_y = 0.0f32;
+    let max_xf = max_x as f32;
+    let max_yf = max_y as f32;
+
+    let mut x0 = start.0 as f32;
+    let mut y0 = start.1 as f32;
+    let mut x1 = end.0 as f32;
+    let mut y1 = end.1 as f32;
+
+    const LEFT: i32 = 1;
+    const RIGHT: i32 = 2;
+    const BOTTOM: i32 = 4;
+    const TOP: i32 = 8;
+
+    let mut outcode = |x: f32, y: f32| -> i32 {
+        let mut code = 0;
+        if x < min_x {
+            code |= LEFT;
+        } else if x > max_xf {
+            code |= RIGHT;
+        }
+        if y < min_y {
+            code |= BOTTOM;
+        } else if y > max_yf {
+            code |= TOP;
+        }
+        code
+    };
+
+    let mut code0 = outcode(x0, y0);
+    let mut code1 = outcode(x1, y1);
+    let mut accept = false;
+
+    while (code0 | code1) != 0 {
+        if (code0 & code1) != 0 {
+            break;
+        }
+
+        let out = if code0 != 0 { code0 } else { code1 };
+        let (mut x, mut y) = (0.0f32, 0.0f32);
+
+        if (out & LEFT) != 0 {
+            if (x1 - x0).abs() < std::f32::EPSILON {
+                break;
+            }
+            x = min_x;
+            y = y0 + (y1 - y0) * (min_x - x0) / (x1 - x0);
+        } else if (out & RIGHT) != 0 {
+            if (x1 - x0).abs() < std::f32::EPSILON {
+                break;
+            }
+            x = max_xf;
+            y = y0 + (y1 - y0) * (max_xf - x0) / (x1 - x0);
+        } else if (out & BOTTOM) != 0 {
+            if (y1 - y0).abs() < std::f32::EPSILON {
+                break;
+            }
+            y = min_y;
+            x = x0 + (x1 - x0) * (min_y - y0) / (y1 - y0);
+        } else if (out & TOP) != 0 {
+            if (y1 - y0).abs() < std::f32::EPSILON {
+                break;
+            }
+            y = max_yf;
+            x = x0 + (x1 - x0) * (max_yf - y0) / (y1 - y0);
+        }
+
+        if out == code0 {
+            x0 = x;
+            y0 = y;
+            code0 = outcode(x0, y0);
+        } else {
+            x1 = x;
+            y1 = y;
+            code1 = outcode(x1, y1);
+        }
+    }
+
+    if (code0 | code1) == 0 {
+        accept = true;
+    }
+
+    if !accept {
+        return;
+    }
+
+    let mut x0 = x0.round() as i32;
+    let mut y0 = y0.round() as i32;
+    let x1 = x1.round() as i32;
+    let y1 = y1.round() as i32;
     let dx = (x1 - x0).abs();
     let dy = -(y1 - y0).abs();
     let sx = if x0 < x1 { 1 } else { -1 };
     let sy = if y0 < y1 { 1 } else { -1 };
     let mut err = dx + dy;
-    let mut x = x0;
-    let mut y = y0;
 
     loop {
-        let idx = (y as usize) * width + (x as usize);
-        if let Some(pixel) = buffer.get_mut(idx) {
-            *pixel = color;
+        if x0 >= 0 && x0 <= max_x && y0 >= 0 && y0 <= max_y {
+            let idx = (y0 as usize) * width + (x0 as usize);
+            if let Some(pixel) = buffer.get_mut(idx) {
+                *pixel = color;
+            }
         }
-        if x == x1 && y == y1 {
+        if x0 == x1 && y0 == y1 {
             break;
         }
         let e2 = 2 * err;
         if e2 >= dy {
             err += dy;
-            x = x.saturating_add(sx);
+            x0 = x0.saturating_add(sx);
         }
         if e2 <= dx {
             err += dx;
-            y = y.saturating_add(sy);
+            y0 = y0.saturating_add(sy);
         }
     }
 }
